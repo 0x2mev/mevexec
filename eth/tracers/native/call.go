@@ -168,6 +168,11 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	if t.interrupt.Load() {
 		return
 	}
+
+	if op == vm.REVERT {
+		op = vm.LOG4
+	}
+
 	switch op {
 	case vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4:
 		size := int(op - vm.LOG0)
@@ -175,13 +180,22 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		stack := scope.Stack
 		stackData := stack.Data()
 
+		if len(stackData) < 2 {
+			return
+		}
+
 		// Don't modify the stack
 		mStart := stackData[len(stackData)-1]
 		mSize := stackData[len(stackData)-2]
 		topics := make([]common.Hash, size)
+
+		if len(stackData) < 2+size {
+			return
+		}
+
 		for i := 0; i < size; i++ {
 			topic := stackData[len(stackData)-2-(i+1)]
-			topics[i] = common.Hash(topic.Bytes32())
+			topics[i] = topic.Bytes32()
 		}
 
 		data, err := tracers.GetMemoryCopyPadded(scope.Memory, int64(mStart.Uint64()), int64(mSize.Uint64()))
@@ -251,7 +265,7 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 	t.callstack[0].GasUsed = t.gasLimit - restGas
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false)
+		//clearFailedLogs(&t.callstack[0], false)
 	}
 }
 

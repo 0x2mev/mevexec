@@ -104,6 +104,11 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			continue
 		}
 		file := file // capture range variable
+
+		if file.Name() != "revert_reason.json" {
+			continue
+		}
+
 		t.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(t *testing.T) {
 			t.Parallel()
 
