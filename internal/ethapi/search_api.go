@@ -181,6 +181,7 @@ func (s *SearcherAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[
 			"gasUsed":     receipt.GasUsed,
 			"fromAddress": from.String(),
 			"toAddress":   to,
+			"logs":        receipt.Logs,
 		}
 		totalGasUsed += receipt.GasUsed
 		gasPrice, err := tx.EffectiveGasTip(header.BaseFee)
@@ -201,10 +202,10 @@ func (s *SearcherAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[
 			hex.Encode(dst, result.Return())
 			jsonResult["value"] = "0x" + string(dst)
 		}
-		// if simulation logs are requested append it to logs
-		if args.SimulationLogs {
-			jsonResult["logs"] = receipt.Logs
-		}
+		//// if simulation logs are requested append it to logs
+		//if args.SimulationLogs {
+		//	jsonResult["logs"] = receipt.Logs
+		//}
 		// if an access list is requested create and append
 		if args.CreateAccessList {
 			// ifdk another way to fill all values so this will have to do - x2
