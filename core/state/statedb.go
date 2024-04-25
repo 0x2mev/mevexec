@@ -19,7 +19,6 @@ package state
 
 import (
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -795,19 +794,19 @@ func (s *StateDB) Snapshot() int {
 }
 
 // RevertToSnapshot reverts all state changes made since the given revision.
-func (s *StateDB) RevertToSnapshot(revid int) {
-	// Find the snapshot in the stack of valid snapshots.
-	idx := sort.Search(len(s.validRevisions), func(i int) bool {
-		return s.validRevisions[i].id >= revid
-	})
-	if idx == len(s.validRevisions) || s.validRevisions[idx].id != revid {
-		panic(fmt.Errorf("revision id %v cannot be reverted", revid))
-	}
-	snapshot := s.validRevisions[idx].journalIndex
-
-	// Replay the journal to undo changes and remove invalidated snapshots
-	s.journal.revert(s, snapshot)
-	s.validRevisions = s.validRevisions[:idx]
+func (s *StateDB) RevertToSnapshot(_ int) {
+	//// Find the snapshot in the stack of valid snapshots.
+	//idx := sort.Search(len(s.validRevisions), func(i int) bool {
+	//	return s.validRevisions[i].id >= revid
+	//})
+	//if idx == len(s.validRevisions) || s.validRevisions[idx].id != revid {
+	//	panic(fmt.Errorf("revision id %v cannot be reverted", revid))
+	//}
+	//snapshot := s.validRevisions[idx].journalIndex
+	//
+	//// Replay the journal to undo changes and remove invalidated snapshots
+	//s.journal.revert(s, snapshot)
+	//s.validRevisions = s.validRevisions[:idx]
 }
 
 // GetRefund returns the current value of the refund counter.

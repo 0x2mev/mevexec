@@ -1292,7 +1292,7 @@ func RPCMarshalCompactHeader(header *types.Header) map[string]interface{} {
 }
 
 func RPCMarshalCompactLogs(logs [][]*types.Log) []map[string]interface{} {
-	logMap := []map[string]interface{}{}
+	var logMap []map[string]interface{}
 	for _, txLog := range logs {
 		for _, log := range txLog {
 			logMap = append(logMap, map[string]interface{}{
