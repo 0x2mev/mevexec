@@ -242,6 +242,23 @@ func (bc *BlockChain) GetRawReceiptsByHash(hash common.Hash) types.Receipts {
 	return rawdb.ReadRawReceipts(bc.db, hash, *number)
 }
 
+// mevexec
+// GetHeaderAndReceiptsByHash retrieves the header and receipts of a block by hash
+// header must not be nil
+func (bc *BlockChain) GetLogsWithHeader(header *types.Header) [][]*types.Log {
+	if receipts, ok := bc.receiptsCache.Get(header.Hash()); ok {
+		logs := make([][]*types.Log, len(receipts))
+		for i, receipt := range receipts {
+			logs[i] = receipt.Logs
+		}
+		return logs
+	}
+	logs := rawdb.ReadLogs(bc.db, header.Hash(), header.Number.Uint64())
+	return logs
+}
+
+// mevexec
+
 // GetUnclesInChain retrieves all the uncles from a given block backwards until
 // a specific distance is reached.
 func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.Header {

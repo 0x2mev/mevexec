@@ -18,7 +18,6 @@
 package memorydb
 
 import (
-	"bytes"
 	"errors"
 	"sort"
 	"strings"

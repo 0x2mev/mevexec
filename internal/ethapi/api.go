@@ -49,6 +49,8 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 )
 
 // estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
@@ -795,7 +797,7 @@ func DoSingleMulticall(ctx context.Context, b Backend, args TransactionArgs, sta
 	// if blockOverrides != nil {
 	// 	blockOverrides.Apply(&blockCtx)
 	// }
-	evm := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true}, &blockCtx)
+	evm := b.GetEVM(ctx, state, header, &vm.Config{NoBaseFee: true}, &blockCtx)
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
@@ -842,7 +844,7 @@ func DoSingleMulticall(ctx context.Context, b Backend, args TransactionArgs, sta
 
 // multicall makes multiple eth_calls, on one state set by the provided block and overrides.
 // returns an array of results [{data: 0x...}], and errors per call tx. the entire call fails if the requested state couldnt be found or overrides failed to be applied
-func (s *BlockChainAPI) Multicall(ctx context.Context, txs []TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride) ([]map[string]interface{}, error) {
+func (s *BlockChainAPI) Multicall(ctx context.Context, txs []TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *override.StateOverride) ([]map[string]interface{}, error) {
 	results := []map[string]interface{}{}
 	state, header, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
@@ -1391,10 +1393,32 @@ func AccessListOnState(ctx context.Context, b Backend, header *types.Header, db 
 	// Retrieve the precompiles since they don't need to be added to the access list
 	precompiles := vm.ActivePrecompiles(b.ChainConfig().Rules(header.Number, isPostMerge, header.Time))
 
+	addressesToExclude := map[common.Address]struct{}{args.from(): {}, to: {}}
+	for _, addr := range precompiles {
+		addressesToExclude[addr] = struct{}{}
+	}
+
+	// Prevent redundant operations if args contain more authorizations than EVM may handle
+	maxAuthorizations := uint64(*args.Gas) / params.CallNewAccountGas
+	if uint64(len(args.AuthorizationList)) > maxAuthorizations {
+		return nil, 0, nil, errors.New("insufficient gas to process all authorizations")
+	}
+
+	for _, auth := range args.AuthorizationList {
+		// Duplicating stateTransition.validateAuthorization() logic
+		if (!auth.ChainID.IsZero() && auth.ChainID.CmpBig(b.ChainConfig().ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+			continue
+		}
+
+		if authority, err := auth.Authority(); err == nil {
+			addressesToExclude[authority] = struct{}{}
+		}
+	}
+
 	// Create an initial tracer
-	prevTracer := logger.NewAccessListTracer(nil, args.from(), to, precompiles)
+	prevTracer := logger.NewAccessListTracer(nil, addressesToExclude)
 	if args.AccessList != nil {
-		prevTracer = logger.NewAccessListTracer(*args.AccessList, args.from(), to, precompiles)
+		prevTracer = logger.NewAccessListTracer(*args.AccessList, addressesToExclude)
 	}
 	for {
 		// Retrieve the current access list to expand
@@ -1416,10 +1440,17 @@ func AccessListOnState(ctx context.Context, b Backend, header *types.Header, db 
 		args.AccessList = &accessList
 		msg := args.ToMessage(header.BaseFee, true, true)
 
+		// addressesToExclude contains sender, receiver, precompiles and valid authorizations
+		addressesToExclude := map[common.Address]struct{}{args.from(): {}, to: {}}
+		for _, addr := range precompiles {
+			addressesToExclude[addr] = struct{}{}
+		}
+
 		// Apply the transaction with the access list tracer
-		tracer := logger.NewAccessListTracer(accessList, args.from(), to, precompiles)
+		tracer := logger.NewAccessListTracer(accessList, addressesToExclude)
+
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
-		vmenv := b.GetEVM(ctx, msg, statedb, header, &config, nil)
+		vmenv := b.GetEVM(ctx, statedb, header, &config, nil)
 		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit))
 		if err != nil {
 			return nil, 0, nil, fmt.Errorf("failed to apply transaction: %v err: %v", args.ToTransaction(types.LegacyTxType).Hash(), err)
@@ -2089,19 +2120,19 @@ func NewSearcherAPI(b Backend, chain *core.BlockChain) *SearcherAPI {
 
 // CallBundleArgs represents the arguments for a call.
 type CallBundleArgs struct {
-	Txs                    []hexutil.Bytes       `json:"txs"`
-	BlockNumber            rpc.BlockNumber       `json:"blockNumber"`
-	StateBlockNumberOrHash rpc.BlockNumberOrHash `json:"stateBlockNumber"`
-	Coinbase               *string               `json:"coinbase"`
-	Timestamp              *uint64               `json:"timestamp"`
-	Timeout                *int64                `json:"timeout"`
-	GasLimit               *uint64               `json:"gasLimit"`
-	Difficulty             *hexutil.Big          `json:"difficulty"`
-	BaseFee                *hexutil.Big          `json:"baseFee"`
-	SimulationLogs         bool                  `json:"simulationLogs"`
-	CreateAccessList       bool                  `json:"createAccessList"`
-	StateOverrides         *StateOverride        `json:"stateOverrides"`
-	MixDigest              *common.Hash          `json:"mixDigest"`
+	Txs                    []hexutil.Bytes         `json:"txs"`
+	BlockNumber            rpc.BlockNumber         `json:"blockNumber"`
+	StateBlockNumberOrHash rpc.BlockNumberOrHash   `json:"stateBlockNumber"`
+	Coinbase               *string                 `json:"coinbase"`
+	Timestamp              *uint64                 `json:"timestamp"`
+	Timeout                *int64                  `json:"timeout"`
+	GasLimit               *uint64                 `json:"gasLimit"`
+	Difficulty             *hexutil.Big            `json:"difficulty"`
+	BaseFee                *hexutil.Big            `json:"baseFee"`
+	SimulationLogs         bool                    `json:"simulationLogs"`
+	CreateAccessList       bool                    `json:"createAccessList"`
+	StateOverrides         *override.StateOverride `json:"stateOverrides"`
+	MixDigest              *common.Hash            `json:"mixDigest"`
 }
 
 // CallBundle will simulate a bundle of transactions at the top of a given block
@@ -2192,7 +2223,9 @@ func (s *SearcherAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	blockCtx := core.NewEVMBlockContext(header, NewChainContext(ctx, s.b), &coinbase)
 	vmconfig := vm.Config{}
+	evm := vm.NewEVM(blockCtx, state, s.b.ChainConfig(), vmconfig)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -2205,13 +2238,14 @@ func (s *SearcherAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[
 	signer := types.MakeSigner(s.b.ChainConfig(), header.Number, header.Time)
 	var totalGasUsed uint64
 	gasFees := new(big.Int)
+
 	for i, tx := range txs {
 		coinbaseBalanceBeforeTx := state.GetBalance(coinbase)
 		state.SetTxContext(tx.Hash(), i)
 
 		accessListState := state.Copy() // create a copy just in case we use it later for access list creation
 
-		receipt, result, err := core.ApplyTransaction(s.b.ChainConfig(), s.chain, &coinbase, gp, state, header, tx, &header.GasUsed, vmconfig)
+		receipt, result, err := core.ApplyTransaction(evm, gp, state, header, tx, &header.GasUsed)
 		if err != nil {
 			return nil, fmt.Errorf("err: %w; txhash %s", err, tx.Hash())
 		}
@@ -2315,14 +2349,14 @@ func (s *SearcherAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[
 
 // EstimateGasBundleArgs are possible args for eth_estimateGasBundle
 type EstimateGasBundleArgs struct {
-	Txs                    []TransactionArgs     `json:"txs"`
-	BlockNumber            rpc.BlockNumber       `json:"blockNumber"`
-	StateBlockNumberOrHash rpc.BlockNumberOrHash `json:"stateBlockNumber"`
-	Coinbase               *string               `json:"coinbase"`
-	Timestamp              *uint64               `json:"timestamp"`
-	Timeout                *int64                `json:"timeout"`
-	StateOverrides         *StateOverride        `json:"stateOverrides"`
-	CreateAccessList       bool                  `json:"createAccessList"`
+	Txs                    []TransactionArgs       `json:"txs"`
+	BlockNumber            rpc.BlockNumber         `json:"blockNumber"`
+	StateBlockNumberOrHash rpc.BlockNumberOrHash   `json:"stateBlockNumber"`
+	Coinbase               *string                 `json:"coinbase"`
+	Timestamp              *uint64                 `json:"timestamp"`
+	Timeout                *int64                  `json:"timeout"`
+	StateOverrides         *override.StateOverride `json:"stateOverrides"`
+	CreateAccessList       bool                    `json:"createAccessList"`
 }
 
 // callbundle, but doesnt require signing
@@ -2410,11 +2444,8 @@ func (s *SearcherAPI) EstimateGasBundle(ctx context.Context, args EstimateGasBun
 		// Convert tx args to msg to apply state transition
 		msg := txArgs.ToMessage(header.BaseFee, true, true)
 
-		// Prepare the hashes
-		txContext := core.NewEVMTxContext(msg)
-
 		// Get EVM Environment
-		vmenv := vm.NewEVM(blockContext, txContext, statedb, s.b.ChainConfig(), vm.Config{NoBaseFee: true})
+		vmenv := vm.NewEVM(blockContext, statedb, s.b.ChainConfig(), vm.Config{NoBaseFee: true})
 
 		// Apply state transition
 		result, err := core.ApplyMessage(vmenv, msg, gp)

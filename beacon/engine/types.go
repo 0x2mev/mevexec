@@ -342,14 +342,6 @@ func BlockToExecutableData(block *types.Block, fees *big.Int, sidecars []*types.
 		Requests:         requests,
 		Override:         false,
 	}
-
-	return &ExecutionPayloadEnvelope{
-		ExecutionPayload: data,
-		BlockValue:       fees,
-		BlobsBundle:      &bundle,
-		Requests:         plainRequests,
-		Override:         false,
-	}
 }
 
 // ExecutionPayloadBody is used in the response to GetPayloadBodiesByHash and GetPayloadBodiesByRange
