@@ -1,4 +1,4 @@
-// Copyright 2025 The go-ethereum Authors
+// Copyright 2024 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -14,23 +14,22 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package common
+package ethclient_test
 
 import (
-	"slices"
-	"testing"
+	"github.com/ethereum/go-ethereum/node"
 )
 
-func TestRangeIter(t *testing.T) {
-	r := NewRange[uint32](1, 7)
-	values := slices.Collect(r.Iter())
-	if !slices.Equal(values, []uint32{1, 2, 3, 4, 5, 6, 7}) {
-		t.Fatalf("wrong iter values: %v", values)
-	}
+var exampleNode *node.Node
 
-	empty := NewRange[uint32](1, 0)
-	values = slices.Collect(empty.Iter())
-	if !slices.Equal(values, []uint32{}) {
-		t.Fatalf("wrong iter values: %v", values)
+// launch example server
+func init() {
+	config := &node.Config{
+		HTTPHost: "127.0.0.1",
 	}
+	n, _, err := newTestBackend(config)
+	if err != nil {
+		panic("can't launch node: " + err.Error())
+	}
+	exampleNode = n
 }
