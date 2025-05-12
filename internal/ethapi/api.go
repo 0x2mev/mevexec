@@ -792,8 +792,14 @@ func DoSingleMulticall(ctx context.Context, b Backend, args TransactionArgs, sta
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg := args.ToMessage(header.BaseFee, true, true)
+	gp := new(core.GasPool).AddGas(gomath.MaxUint64)
 	blockCtx := core.NewEVMBlockContext(header, NewChainContext(ctx, b), nil)
+	if err := args.CallDefaults(gp.Gas(), blockCtx.BaseFee, b.ChainConfig().ChainID); err != nil {
+		return map[string]interface{}{
+			"error": err,
+		}
+	}
+	msg := args.ToMessage(header.BaseFee, true, true)
 	// if blockOverrides != nil {
 	// 	blockOverrides.Apply(&blockCtx)
 	// }
@@ -806,7 +812,6 @@ func DoSingleMulticall(ctx context.Context, b Backend, args TransactionArgs, sta
 	}()
 
 	// Execute the message.
-	gp := new(core.GasPool).AddGas(gomath.MaxUint64)
 	result, err := core.ApplyMessage(evm, msg, gp)
 	if err := state.Error(); err != nil {
 		return map[string]interface{}{
@@ -2442,6 +2447,9 @@ func (s *SearcherAPI) EstimateGasBundle(ctx context.Context, args EstimateGasBun
 		accessListState := statedb.Copy() // create a copy just in case we use it later for access list creation
 
 		// Convert tx args to msg to apply state transition
+		if err := txArgs.CallDefaults(gp.Gas(), blockContext.BaseFee, s.b.ChainConfig().ChainID); err != nil {
+			return nil, err
+		}
 		msg := txArgs.ToMessage(header.BaseFee, true, true)
 
 		// Get EVM Environment
