@@ -811,7 +811,7 @@ func DoSingleMulticall(ctx context.Context, b Backend, args TransactionArgs, sta
 			"error": err,
 		}
 	}
-	msg := args.ToMessage(header.BaseFee, true, true)
+	msg := args.ToMessage(header.BaseFee, true)
 	// if blockOverrides != nil {
 	// 	blockOverrides.Apply(&blockCtx)
 	// }
@@ -1469,7 +1469,7 @@ func AccessListOnState(ctx context.Context, b Backend, header *types.Header, db 
 	nogas := args.Gas == nil
 
 	// Ensure any missing fields are filled, extract the recipient and input data
-	if err := args.setDefaults(ctx, b, true); err != nil {
+	if err := args.setDefaults(ctx, b, sidecarConfig{}); err != nil {
 		return nil, 0, nil, err
 	}
 	var to common.Address
@@ -1520,7 +1520,7 @@ func AccessListOnState(ctx context.Context, b Backend, header *types.Header, db 
 		// and it's convered by the sender only anyway.
 		if nogas {
 			args.Gas = nil
-			if err := args.setDefaults(ctx, b, true); err != nil {
+			if err := args.setDefaults(ctx, b, sidecarConfig{}); err != nil {
 				return nil, 0, nil, err // shouldn't happen, just in case
 			}
 		}
@@ -1528,7 +1528,7 @@ func AccessListOnState(ctx context.Context, b Backend, header *types.Header, db 
 		statedb := db.Copy() // woops shouldn't have removed this lol
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		msg := args.ToMessage(header.BaseFee, true, true)
+		msg := args.ToMessage(header.BaseFee, true)
 
 		// addressesToExclude contains sender, receiver, precompiles and valid authorizations
 		addressesToExclude := map[common.Address]struct{}{args.from(): {}, to: {}}
@@ -2552,7 +2552,7 @@ func (s *SearcherAPI) EstimateGasBundle(ctx context.Context, args EstimateGasBun
 		if err := txArgs.CallDefaults(gp.Gas(), blockContext.BaseFee, s.b.ChainConfig().ChainID); err != nil {
 			return nil, err
 		}
-		msg := txArgs.ToMessage(header.BaseFee, true, true)
+		msg := txArgs.ToMessage(header.BaseFee, true)
 
 		// Get EVM Environment
 		vmenv := vm.NewEVM(blockContext, statedb, s.b.ChainConfig(), vm.Config{NoBaseFee: true})
