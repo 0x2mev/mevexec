@@ -32,6 +32,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/mclock"
+	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -84,6 +85,7 @@ type Table struct {
 	closeReq        chan struct{}
 	closed          chan struct{}
 
+	nodeFeed        event.FeedOf[*enode.Node]
 	nodeAddedHook   func(*bucket, *tableNode)
 	nodeRemovedHook func(*bucket, *tableNode)
 }
@@ -562,11 +564,13 @@ func (tab *Table) addReplacement(b *bucket, n *enode.Node) {
 }
 
 func (tab *Table) nodeAdded(b *bucket, n *tableNode) {
-	if n.addedToTable == (time.Time{}) {
+	if n.addedToTable.IsZero() {
 		n.addedToTable = time.Now()
 	}
 	n.addedToBucket = time.Now()
 	tab.revalidation.nodeAdded(tab, n)
+
+	tab.nodeFeed.Send(n.Node)
 	if tab.nodeAddedHook != nil {
 		tab.nodeAddedHook(b, n)
 	}
@@ -701,4 +705,39 @@ func (tab *Table) deleteNode(n *enode.Node) {
 	defer tab.mutex.Unlock()
 	b := tab.bucket(n.ID())
 	tab.deleteInBucket(b, n.ID())
+}
+
+// waitForNodes blocks until the table contains at least n nodes.
+func (tab *Table) waitForNodes(ctx context.Context, n int) error {
+	getlength := func() (count int) {
+		for _, b := range &tab.buckets {
+			count += len(b.entries)
+		}
+		return count
+	}
+
+	var ch chan *enode.Node
+	for {
+		tab.mutex.Lock()
+		if getlength() >= n {
+			tab.mutex.Unlock()
+			return nil
+		}
+		if ch == nil {
+			// Init subscription.
+			ch = make(chan *enode.Node)
+			sub := tab.nodeFeed.Subscribe(ch)
+			defer sub.Unsubscribe()
+		}
+		tab.mutex.Unlock()
+
+		// Wait for a node add event.
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tab.closeReq:
+			return errClosed
+		}
+	}
 }

@@ -41,8 +41,9 @@ import (
 
 // Config represents the configuration of the filter system.
 type Config struct {
-	LogCacheSize int           // maximum number of cached blocks (default: 32)
-	Timeout      time.Duration // how long filters stay active (default: 5min)
+	LogCacheSize  int           // maximum number of cached blocks (default: 32)
+	Timeout       time.Duration // how long filters stay active (default: 5min)
+	LogQueryLimit int           // maximum number of addresses allowed in filter criteria (default: 1000)
 }
 
 func (cfg Config) withDefaults() Config {
@@ -98,7 +99,7 @@ type logCacheElem struct {
 }
 
 // cachedLogElem loads block logs from the backend and caches the result.
-func (sys *FilterSystem) cachedLogElem(ctx context.Context, blockHash common.Hash, number uint64) (*logCacheElem, error) {
+func (sys *FilterSystem) cachedLogElem(ctx context.Context, blockHash common.Hash, number, time uint64) (*logCacheElem, error) {
 	cached, ok := sys.logsCache.Get(blockHash)
 	if ok {
 		return cached, nil
@@ -119,6 +120,7 @@ func (sys *FilterSystem) cachedLogElem(ctx context.Context, blockHash common.Has
 		for _, log := range txLogs {
 			log.BlockHash = blockHash
 			log.BlockNumber = number
+			log.BlockTimestamp = time
 			log.TxIndex = uint(i)
 			log.Index = logIdx
 			logIdx++
@@ -206,7 +208,7 @@ type EventSystem struct {
 }
 
 // NewEventSystem creates a new manager that listens for event on the given mux,
-// parses and filters them. It uses the all map to retrieve filter changes. The
+// parses and filters them. It uses an internal map to retrieve filter changes. The
 // work loop holds its own index that is used to forward events to filters.
 //
 // The returned manager has a loop that needs to be stopped with the Stop function
@@ -289,6 +291,16 @@ func (es *EventSystem) subscribe(sub *subscription) *Subscription {
 func (es *EventSystem) SubscribeLogs(crit ethereum.FilterQuery, logs chan []*types.Log) (*Subscription, error) {
 	if len(crit.Topics) > maxTopics {
 		return nil, errExceedMaxTopics
+	}
+	if es.sys.cfg.LogQueryLimit != 0 {
+		if len(crit.Addresses) > es.sys.cfg.LogQueryLimit {
+			return nil, errExceedLogQueryLimit
+		}
+		for _, topics := range crit.Topics {
+			if len(topics) > es.sys.cfg.LogQueryLimit {
+				return nil, errExceedLogQueryLimit
+			}
+		}
 	}
 	var from, to rpc.BlockNumber
 	if crit.FromBlock == nil {
